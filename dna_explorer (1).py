@@ -391,8 +391,7 @@ def set_flash(msg, duration=2.5):
 
 
 def compute_in_view_selection():
-    """Approximates 'click to select' (see header note): picks whichever organelle
-    is closest to dead-center of the current view direction."""
+    
     eye, target = eye_and_target()
     fx, fy, fz = (target[0] - eye[0], target[1] - eye[1], target[2] - eye[2])
     flen = vec_len((fx, fy, fz)) or 1.0
@@ -423,9 +422,7 @@ def track_visit(key):
 
 
 def search_match(query):
-    """Finds the best organelle name match for a typed search query. No text-input
-    widget exists under the function whitelist, so keyboardListener() captures
-    letters directly into search_buffer instead (see below)."""
+   
     query = query.lower().strip()
     if not query:
         return None
@@ -786,8 +783,7 @@ def draw_protein_folding(ribosome_pos):
 # ===============================  CYTOSKELETON (NEW)  =================================
 
 def draw_cytoskeleton():
-    """A dynamically-generated fiber network radiating from the nucleus toward the
-    membrane, built with nested loops (not hardcoded), drawn purely with GL_POINTS."""
+   
     if not cytoskeleton_visible:
         return
     glColor3f(*theme_color(0.5, 0.5, 0.55))
