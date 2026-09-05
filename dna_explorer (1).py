@@ -1,3 +1,5 @@
+#  Requirements:
+#      pip install PyOpenGL PyOpenGL_accelerate (must run in the terminal before executing the code )
 #  ------------------------------------------------------------------------
 #  CONTROLS  (see also: press 'H' any time for this list on-screen)
 #  MOVEMENT        W/S forward-back, A/D strafe, Q/E down-up
