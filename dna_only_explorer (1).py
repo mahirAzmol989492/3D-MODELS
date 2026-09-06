@@ -1,3 +1,21 @@
+# ====================================================================================
+#  DNA Explorer
+#
+#  A focused, single-subject version of the earlier "3D DNA / Cell Explorer": instead
+#  of a whole cell full of organelles, this shows just a nucleus with a DNA helix
+#  inside it (plus one ribosome off to the side for translation), and lets you step
+#  through replication, transcription, translation, chromosome packing, mutation, and
+#  the cell cycle/mitosis -- with on-screen explanations for each.
+#
+#  FUNCTION WHITELIST: every call here is either from the same three course skeleton
+#  files used throughout this project (Hello_openGL.py, Lets_draw_sth.py,
+#  3D_OpenGL_Intro.py), or is glEnable(GL_DEPTH_TEST) -- the one extra function you
+#  explicitly said is now OK to use. That one addition is a real simplification: the
+#  previous project had to manually sort every object back-to-front every frame
+#  ("painter's algorithm") because depth testing wasn't available. With real depth
+#  testing on, the GPU figures out occlusion correctly on its own, so that whole
+#  sorting step is gone.
+#
 #  Requirements:
 #      pip install PyOpenGL PyOpenGL_accelerate
 #
@@ -23,6 +41,7 @@ import math
 import random
 import time
 import os
+import atexit
 
 if os.environ.get("XDG_SESSION_TYPE") == "wayland":
     os.environ["PYOPENGL_PLATFORM"] = "glx"
@@ -59,7 +78,8 @@ for _i in range(PROTEIN_CHAIN_LEN):
     _angle = _t * 4 * math.pi
     PROTEIN_FOLDED_OFFSETS.append((15 * math.cos(_angle), 15 * math.sin(_angle), _t * 60 - 30))
 
-
+# --- explanatory text shown while each process is animating (not random -- each
+#     one is tied directly to whatever is actually happening on screen) ---
 PROCESS_INFO = {
     "replication": [
         "REPLICATION: the cell is copying its DNA before dividing.",
@@ -104,7 +124,11 @@ CELL_CYCLE_INFO = {
                  "into two separate daughter cells.",
 }
 
-# ===================================STATE==========================================
+
+
+# ======================================================================================
+# ===================================  STATE  ==========================================
+# ======================================================================================
 
 # --- camera (single orbit mode around the nucleus) ---
 orbit_angle = 0.0
@@ -145,7 +169,17 @@ fps_display = 0.0
 _fps_accum_time = 0.0
 _fps_accum_frames = 0
 
-# ==================================MATH HELPERS====================================
+# --- GL resources (cached quadrics) ---
+_quadric = None
+
+# Target frame cap (ms per frame) -- use glutTimerFunc to avoid busy-looping in glutIdle
+TARGET_FPS = 60
+TARGET_MS = int(1000 / TARGET_FPS)
+
+
+# ======================================================================================
+# ==================================  MATH HELPERS  ====================================
+# ======================================================================================
 
 def clamp(v, lo, hi):
     return max(lo, min(hi, v))
@@ -162,7 +196,10 @@ def ease_in_out_cubic(t):
     p = -2 * t + 2
     return 1 - (p * p * p) / 2
 
+
+# ======================================================================================
 # ================================  TEXT / HUD HELPERS  ================================
+# ======================================================================================
 
 def draw_text(x, y, text, font=GLUT_BITMAP_HELVETICA_18):
     """Same 2D-overlay-on-3D trick used throughout this project: swap in a flat
@@ -221,7 +258,9 @@ def draw_bar(x, y, w, h, fraction, fg_color, bg_color=(0.2, 0.2, 0.2)):
     glMatrixMode(GL_MODELVIEW)
 
 
+# ======================================================================================
 # ==================================  CAMERA  ===========================================
+# ======================================================================================
 
 def setup_camera():
     glMatrixMode(GL_PROJECTION)
@@ -236,7 +275,17 @@ def setup_camera():
     eye_z = orbit_height
     gluLookAt(eye_x, eye_y, eye_z, 0, 0, 0, 0, 0, 1)
 
-# ==================================DNA==============================================
+
+# ======================================================================================
+# ==================================  DNA  ==============================================
+# ======================================================================================
+
+# cache strands when constants don't change
+_cached_strand1 = None
+_cached_strand2 = None
+_cached_strand_params = None
+
+
 def generate_dna_strands():
     """Builds the double-helix backbone points with a loop (dynamic, not hardcoded)."""
     strand1, strand2 = [], []
@@ -249,8 +298,17 @@ def generate_dna_strands():
     return strand1, strand2
 
 
+def _get_cached_strands():
+    global _cached_strand1, _cached_strand2, _cached_strand_params
+    params = (NUM_BASE_PAIRS, HELIX_RADIUS, HELIX_HEIGHT, HELIX_TURNS)
+    if _cached_strand_params != params:
+        _cached_strand_params = params
+        _cached_strand1, _cached_strand2 = generate_dna_strands()
+    return _cached_strand1, _cached_strand2
+
+
 def draw_dna_rung(p1, p2, color):
-  
+    """A 'dotted rung' connecting two backbone points, drawn purely with GL_POINTS."""
     glColor3f(*color)
     glPointSize(2)
     glBegin(GL_POINTS)
@@ -262,8 +320,8 @@ def draw_dna_rung(p1, p2, color):
 
 
 def draw_dna_helix():
-   
-    strand1, strand2 = generate_dna_strands()
+    """Packing level 0: the full double helix, with replication/transcription overlays."""
+    strand1, strand2 = _get_cached_strands()
 
     fork = None
     if replication_active:
@@ -282,9 +340,9 @@ def draw_dna_helix():
         p2s = (p2[0] + split, p2[1], p2[2])
 
         glColor3f(*color1)
-        glPushMatrix(); glTranslatef(*p1s); gluSphere(gluNewQuadric(), 5, 8, 8); glPopMatrix()
+        glPushMatrix(); glTranslatef(*p1s); gluSphere(_quadric, 5, 8, 8); glPopMatrix()
         glColor3f(*color2)
-        glPushMatrix(); glTranslatef(*p2s); gluSphere(gluNewQuadric(), 5, 8, 8); glPopMatrix()
+        glPushMatrix(); glTranslatef(*p2s); gluSphere(_quadric, 5, 8, 8); glPopMatrix()
 
         if i % 2 == 0:
             rung_color = (0.85, 0.85, 0.85)
@@ -299,7 +357,7 @@ def draw_dna_helix():
     if transcription_active:
         z = -HELIX_HEIGHT / 2 + transcription_progress * HELIX_HEIGHT
         glColor3f(1.0, 0.6, 0.1)
-        glPushMatrix(); glTranslatef(HELIX_RADIUS + 15, 0, z); gluSphere(gluNewQuadric(), 9, 8, 8); glPopMatrix()
+        glPushMatrix(); glTranslatef(HELIX_RADIUS + 15, 0, z); gluSphere(_quadric, 9, 8, 8); glPopMatrix()
         glColor3f(0.3, 1.0, 0.5)
         glPointSize(3)
         glBegin(GL_POINTS)
@@ -312,7 +370,7 @@ def draw_dna_helix():
 
 
 def draw_chromatin():
-    
+    """Packing level 1: fewer, larger beads on a looser coil (chromatin fiber)."""
     beads = 16
     glColor3f(0.5, 0.4, 0.8)
     for i in range(beads):
@@ -321,21 +379,21 @@ def draw_chromatin():
         angle = frac * 2 * 2 * math.pi
         radius = HELIX_RADIUS * 1.8
         x, y = radius * math.cos(angle), radius * math.sin(angle)
-        glPushMatrix(); glTranslatef(x, y, z); gluSphere(gluNewQuadric(), 10, 8, 8); glPopMatrix()
+        glPushMatrix(); glTranslatef(x, y, z); gluSphere(_quadric, 10, 8, 8); glPopMatrix()
 
 
 def draw_chromosome():
-   
+    """Packing level 2: a fully condensed X-shaped chromosome."""
     glColor3f(0.7, 0.25, 0.65)
     length = HELIX_HEIGHT * 0.5
     for side in (-1, 1):
         glPushMatrix()
         glRotatef(side * 20, 1, 0, 0)
         glTranslatef(0, 0, -length / 2)
-        gluCylinder(gluNewQuadric(), 14, 14, length, 10, 4)
+        gluCylinder(_quadric, 14, 14, length, 10, 4)
         glPopMatrix()
     glColor3f(0.95, 0.85, 0.3)
-    glPushMatrix(); gluSphere(gluNewQuadric(), 16, 10, 10); glPopMatrix()
+    glPushMatrix(); gluSphere(_quadric, 16, 10, 10); glPopMatrix()
 
 
 def draw_dna(center):
@@ -353,7 +411,9 @@ def draw_dna(center):
     glPopMatrix()
 
 
+# ======================================================================================
 # ===============================  NUCLEUS / MITOSIS  ==================================
+# ======================================================================================
 
 def draw_nucleus_membrane(center, radius):
     glColor3f(0.55, 0.45, 0.75)
@@ -392,18 +452,21 @@ def draw_scene_nucleus():
         draw_dna(pos)
 
 
+# ======================================================================================
 # ===============================  RIBOSOME / TRANSLATION  =============================
+# ======================================================================================
+
 
 def draw_ribosome():
     glColor3f(0.30, 0.65, 0.95)
     glPushMatrix()
     glTranslatef(RIBOSOME_POS[0], RIBOSOME_POS[1], RIBOSOME_POS[2] + RIBOSOME_RADIUS * 0.3)
-    gluSphere(gluNewQuadric(), RIBOSOME_RADIUS, 12, 12)          # large subunit
+    gluSphere(_quadric, RIBOSOME_RADIUS, 12, 12)          # large subunit
     glPopMatrix()
     glColor3f(0.6, 0.85, 1.0)
     glPushMatrix()
     glTranslatef(RIBOSOME_POS[0], RIBOSOME_POS[1], RIBOSOME_POS[2] - RIBOSOME_RADIUS * 0.6)
-    gluSphere(gluNewQuadric(), RIBOSOME_RADIUS * 0.65, 12, 12)   # small subunit
+    gluSphere(_quadric, RIBOSOME_RADIUS * 0.65, 12, 12)   # small subunit
     glPopMatrix()
 
 
@@ -420,7 +483,8 @@ def draw_translation():
 
 
 def draw_protein_folding():
-   
+    """A short amino-acid chain animating from a straight line into a folded coil,
+    eased with ease_in_out_cubic for a smoother finish than linear motion."""
     if protein_folding_progress <= 0:
         return
     t = ease_in_out_cubic(protein_folding_progress)
@@ -433,11 +497,13 @@ def draw_protein_folding():
         x, y, z = lerp(ux, fx, t), lerp(uy, fy, t), lerp(uz, fz, t)
         glPushMatrix()
         glTranslatef(base_x + x, base_y + y, base_z + z)
-        gluSphere(gluNewQuadric(), 6, 8, 8)
+        gluSphere(_quadric, 6, 8, 8)
         glPopMatrix()
 
 
+# ======================================================================================
 # ==========================  HEALTH / MUTATION / CELL CYCLE  ==========================
+# ======================================================================================
 
 def trigger_mutation():
     global cell_health, mutation_count, mutation_flash_timer, mutation_highlight_indices
@@ -551,7 +617,9 @@ def draw_hud():
               "Auto-rotate: " + ("ON" if auto_rotate else "OFF"))
 
 
+# ======================================================================================
 # ====================================  UPDATE  ========================================
+# ======================================================================================
 
 def idle():
     global last_time, dna_rotation, fps_display, _fps_accum_time, _fps_accum_frames
@@ -611,10 +679,19 @@ def idle():
         target_split = 1.0 if CELL_CYCLE_PHASES[cell_cycle_index] in ("Anaphase", "Telophase") else 0.0
         split_amount += (target_split - split_amount) * clamp(dt * 1.5, 0, 1)
 
+    # don't call glutPostRedisplay() here; timer callback will post when appropriate
+
+
+# Timer-based updater to cap frame-rate and avoid 100% CPU usage.
+def timer_func(_=0):
+    idle()
     glutPostRedisplay()
+    glutTimerFunc(TARGET_MS, timer_func, 0)
 
 
-# ===================================  CALLBACKS  ======================================
+# ======================================================================================
+# ===================================  CALLBACKS  =====================================
+# ======================================================================================
 
 def keyboardListener(key, x, y):
     global auto_rotate, replication_active, transcription_active, translation_active
@@ -622,6 +699,10 @@ def keyboardListener(key, x, y):
 
     if key == b'\x1b':
         print("Exiting DNA Explorer.")
+        try:
+            free_gl_resources()
+        except Exception:
+            pass
         os._exit(0)   # glutLeaveMainLoop() isn't in the whitelist -- see header note
 
     elif key == b'r':
@@ -703,6 +784,33 @@ def showScreen():
 # ====================================  MAIN  ==========================================
 # ======================================================================================
 
+def init_gl_resources():
+    """Create and cache GLU quadrics. Must be called after an OpenGL context is created."""
+    global _quadric
+    try:
+        if _quadric is None:
+            _quadric = gluNewQuadric()
+            # optionally configure normals/textures: gluQuadricNormals(_quadric, GLU_SMOOTH)
+    except Exception as e:
+        print(f"Warning: failed to create GLU quadric: {e}")
+        _quadric = None
+
+
+def free_gl_resources():
+    """Delete cached GLU quadrics. Safe to call multiple times."""
+    global _quadric
+    try:
+        if _quadric is not None:
+            try:
+                gluDeleteQuadric(_quadric)
+            except Exception:
+                # some implementations may not expose gluDeleteQuadric; ignore failures
+                pass
+            _quadric = None
+    except Exception:
+        pass
+
+
 def main():
     glutInit()
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
@@ -714,11 +822,17 @@ def main():
                               #    used exactly as permitted, so real depth testing works
                               #    and no back-to-front sorting workaround is needed
 
+    # create cached GL resources now that the context exists
+    init_gl_resources()
+    # ensure resources are freed on normal python exit
+    atexit.register(free_gl_resources)
+
     glutDisplayFunc(showScreen)
     glutKeyboardFunc(keyboardListener)
     glutSpecialFunc(specialKeyListener)
     glutMouseFunc(mouseListener)
-    glutIdleFunc(idle)
+    # use timer-based updates to cap frame-rate and avoid busy-wait in glutIdle
+    glutTimerFunc(TARGET_MS, timer_func, 0)
 
     glutMainLoop()
 
