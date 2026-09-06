@@ -1,24 +1,3 @@
-# ====================================================================================
-#  DNA Explorer
-#
-#  A focused, single-subject version of the earlier "3D DNA / Cell Explorer": instead
-#  of a whole cell full of organelles, this shows just a nucleus with a DNA helix
-#  inside it (plus one ribosome off to the side for translation), and lets you step
-#  through replication, transcription, translation, chromosome packing, mutation, and
-#  the cell cycle/mitosis -- with on-screen explanations for each.
-#
-#  FUNCTION WHITELIST: every call here is either from the same three course skeleton
-#  files used throughout this project (Hello_openGL.py, Lets_draw_sth.py,
-#  3D_OpenGL_Intro.py), or is glEnable(GL_DEPTH_TEST) -- the one extra function you
-#  explicitly said is now OK to use. That one addition is a real simplification: the
-#  previous project had to manually sort every object back-to-front every frame
-#  ("painter's algorithm") because depth testing wasn't available. With real depth
-#  testing on, the GPU figures out occlusion correctly on its own, so that whole
-#  sorting step is gone.
-#
-#  Requirements:
-#      pip install PyOpenGL PyOpenGL_accelerate
-#
 #  ------------------------------------------------------------------------
 #  CONTROLS
 #      LEFT / RIGHT     : orbit the camera around the DNA
@@ -275,11 +254,7 @@ def setup_camera():
     eye_z = orbit_height
     gluLookAt(eye_x, eye_y, eye_z, 0, 0, 0, 0, 0, 1)
 
-
-# ======================================================================================
 # ==================================  DNA  ==============================================
-# ======================================================================================
-
 # cache strands when constants don't change
 _cached_strand1 = None
 _cached_strand2 = None
